@@ -71,16 +71,7 @@ Completeness >50%
 Contamination <5%
 Quality Score = Completeness - 5×Contamination >50
 ```{bash eval=FALSE,include=FALSE, echo=TURE}
-# Coverage calculation
-jgi_summarize_bam_contig_depths --outputDepth depth.txt *.bam
-
-# MetaBAT2 binning
-metabat2 -i contigs.fa -a depth.txt -o bins_dir/bin \
-  -m 1500 -t 24 --seed 42
-
-# Quality assessment
-checkm lineage_wf -x fa bins_dir/ checkm_out/ \
-  --tab_table -f checkm_results.tsv --threads 16
+perl assembly_binning.pl  -assembly_list fa.list  -o 
 ```  
 
 ## 2. Species/Strain Clustering
