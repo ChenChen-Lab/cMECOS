@@ -1,0 +1,750 @@
+#Figure 1
+```{r}
+annotation_genome=read.csv("annotation_5006_all.csv",row.names = "X")
+bins_sp_abundence=read.delim("all_bins_species_coverm.out",row.names = "Genome")
+annotation_genome_abun=merge(annotation_genome,mt_abudence,by.x=c("sample_ID","Rep_SP_ID"),by.y=c("Var2","Var1"))
+
+library(reshape2)
+mt_abudence=melt(as.matrix(bins_sp_abundence))
+
+plot_unculture_culture=function(PID_s){
+abundence_001_unculture=subset(mt_abudence,Var2==unique(subset(annotation_genome_abun,PID==PID_s&Cul_type =="unculture")$sample_ID)& Var1 %in% unique(subset(annotation_genome_abun,PID==PID_s)$Rep_SP_ID))
+abundence_001_unculture$HMQ_inUnculture="N"
+abundence_001_unculture[abundence_001_unculture$Var1  %in% unique(subset(annotation_genome_abun,PID==PID_s&Cul_type =="unculture")$Rep_SP_ID),"HMQ_inUnculture"]="Y"
+abundence_001_unculture=abundence_001_unculture[order(abundence_001_unculture$value,decreasing = T),]
+threohold= as.character(tail(subset(abundence_001_unculture,value>1),1)$Var1)
+p1=ggplot(abundence_001_unculture,aes(x=Var1,y=value,fill=HMQ_inUnculture))+geom_bar(stat="identity")+xlim(abundence_001_unculture$Var1)+theme_classic()+geom_vline(xintercept = threohold)
+
+abundence_001_cultured=subset(mt_abudence,Var2==unique(subset(annotation_genome_abun,PID==PID_s&Cul_type !="unculture")$sample_ID)&Var1 %in% unique(subset(annotation_genome_abun,PID==PID_s)$Rep_SP_ID))
+abundence_001_cultured$Var1=as.character(abundence_001_cultured$Var1)
+abundence_001_cultured_max=data.frame(value=tapply(abundence_001_cultured$value,abundence_001_cultured$Var1,max))
+abundence_001_cultured_max$Var1=row.names(abundence_001_cultured_max)
+abundence_001_cultured_max=merge(abundence_001_cultured_max,abundence_001_unculture,by="Var1")
+colnames(abundence_001_cultured_max)[c(2,4)]=c("abundence.cultured","abundence.unculture")
+abundence_001_cultured_max$increase_decrease="increase"
+abundence_001_cultured_max[abundence_001_cultured_max$abundence.cultured<abundence_001_cultured_max$abundence.unculture,"increase_decrease"]="decrease"
+
+p2=ggplot(abundence_001_cultured_max,aes(x=Var1,y=-abundence.cultured,fill=increase_decrease))+geom_bar(stat="identity")+xlim(abundence_001_unculture$Var1)+theme_classic()+geom_vline(xintercept = threohold)
+library(patchwork)
+print(p1/p2)
+}
+plot_unculture_culture("P37")
+
+
+MECOS_169_bl=read.delim("MECOS_2023_169.128.bl6",header = F)
+MECOS_170_bl=read.delim("MECOS_2023_170.9.bl6",header = F)
+ggplot()+geom_rect(data=MECOS_169_bl,aes(xmin=V9,xmax=V10,ymin=3.2,ymax=4,fill=V1))+coord_polar()+ylim(0,4)+geom_rect(data=MECOS_170_bl,aes(xmin=V9,xmax=V10,ymin=2,ymax=2.8,fill=V1))+theme_classic()
+```
+
+```{r}
+library(ape)
+library(dplyr)
+
+tree <- read.tree("sp_ar_combine.nwk")
+taxa_data <- read.csv("sp_repesentive.csv")
+
+colnames(taxa_data)[1]="tip.label"
+p <- ggtree(tree) %<+% taxa_data
+p +   geom_tiplab(aes(color = ph), size = 3) +  theme(legend.position = "right")
+
+target_phylum <- "Firmicutes"
+
+
+target_species <- taxa_data %>%
+  filter(ph == target_phylum) %>%
+  pull(tip.label )
+
+
+outgroup <- head(subset(taxa_data,ph=="Bacteroidota"),1)[,1]
+target_species=c(target_species,outgroup)
+
+
+valid_species <- target_species[target_species %in% tree$tip.label]
+if (length(valid_species) == 0) {
+  stop("Error:Not found")
+}
+
+
+
+pruned_tree <- keep.tip(tree, valid_species)
+
+rerooted_tree <- root(pruned_tree, outgroup = outgroup, edgelabel = TRUE)
+p_reroot <- ggtree(rerooted_tree) %<+% taxa_data
+p_reroot <- p_reroot + geom_tiplab(aes(color = fa)) + theme_tree2()
+print(p_reroot)
+
+
+write.tree(rerooted_tree, "pruned_sp_Firmicutes_tree.nwk")
+
+select_taxa=subset(taxa_data,ph =="Firmicutes")
+p <- ggtree(rerooted_tree) %<+% select_taxa
+families=unique(select_taxa$fa)
+
+for (fam in families) {
+target_family <- fam
+family_tips <- select_taxa$tip.label[select_taxa$fa == target_family]
+
+
+is_monophyletic <- is.monophyletic(rerooted_tree, family_tips)
+if (is_monophyletic) {
+  message(paste(target_family,"Target is monophyletic"))
+} else {
+  warning(paste(target_family,"Target is not monophyletic, need to re-root"))
+}
+}
+
+
+find_subclusters <- function(tree, tips) {
+  clusters <- list()
+  remaining_tips <- tips
+  
+
+  for (node in unique(c(tree$edge[,1]))) {
+    clade_tips <- treeio::offspring(tree, node, type = "tips") %>% 
+      tree$tip.label[.]
+    overlap <- intersect(clade_tips, remaining_tips)
+    if (length(overlap) > 0 && is.monophyletic(tree, overlap)) {
+      clusters <- c(clusters, list(overlap))
+      remaining_tips <- setdiff(remaining_tips, overlap)  
+    }
+  }
+  
+
+  if (length(remaining_tips) > 0) {
+    clusters <- c(clusters, list(remaining_tips))
+  }
+  return(clusters)
+}
+target_family <- "Ruminococcaceae"
+family_tips <- select_taxa$tip.label[select_taxa$fa == target_family]
+subclusters <- find_subclusters(tree, family_tips)
+
+select_taxa$sub_fa=select_taxa$fa
+select_taxa[select_taxa$tip.label %in% subclusters[[1]],"sub_fa"]=paste0(target_family,"_1")
+select_taxa[select_taxa$tip.label %in% subclusters[[2]],"sub_fa"]=paste0(target_family,"_2")
+
+families=unique(select_taxa$sub_fa)
+
+for (fam in families) {
+  target_family <- fam
+  family_tips <- select_taxa$tip.label[select_taxa$sub_fa == target_family]
+
+}
+
+p <- ggtree(rerooted_tree) %<+% select_taxa
+p+ geom_tiplab(aes(color = sub_fa), size = 3)
+
+
+families <- unique(select_taxa$sub_fa)
+node_list <- lapply(families, function(fam) {
+  tips <- select_taxa$tip.label[select_taxa$sub_fa == fam]
+  if (length(tips) == 0) {
+    NULL  
+  } else if (length(tips) == 1) {
+    
+    which(rerooted_tree$tip.label == tips)
+  } else {
+   
+    getMRCA(rerooted_tree, tips)
+  }
+}) %>% setNames(families)
+
+p <- ggtree(rerooted_tree) %<+% select_taxa+   geom_tiplab(size = 3) +   xlim_expand(0.2, "tree")
+
+for (fam in names(node_list)) {
+  node <- node_list[[fam]]
+  if (!is.null(node)) {
+    p <- collapse(p, node) 
+  }
+}
+
+
+for (fam in names(node_list)) {
+  node <- node_list[[fam]]
+  if (!is.null(node)) {
+    p <- p + geom_cladelabel(
+      node = node,
+      label = fam,
+      align = TRUE,
+      color = "red",
+      offset = 0.5
+    )
+  }
+}
+p<- p+geom_nodelab(aes(label =label), size = 3, color = "red", hjust = 1.5,vjust = -0.5)
+print(p)
+```
+#Figure 1F (Python)
+```{python }
+
+fig = plt.figure(figsize=(5,5))
+plt.pie([50,406], radius=1,colors=["#fdd1a1","#c9c9c9"],wedgeprops=dict(width=0.28, edgecolor='white',linewidth=3))
+
+# Second Ring (Inside)
+plt.pie([12,38,406], radius=1-0.33,colors=["#c9c9c9","#c84931","#c9c9c9"], labeldistance=0.7,wedgeprops=dict(width=0.25, edgecolor='white',linewidth=3));
+fig.savefig("Species_in_CGG2.pdf")
+
+fig = plt.figure(figsize=(5,5))
+plt.pie([1245,1194], radius=1,colors=["#fdd1a1","#c9c9c9"],wedgeprops=dict(width=0.28, edgecolor='white',linewidth=3))
+
+# Second Ring (Inside)
+plt.pie([1140,105,1194], radius=1-0.33,colors=["#c9c9c9","#c84931","#c9c9c9"], labeldistance=0.7,wedgeprops=dict(width=0.25, edgecolor='white',linewidth=3));
+fig.savefig("Strains_in_CGG2.pdf")
+```
+
+
+#Figure 2
+```{r}
+library("dplyr")
+mine_MGV_connect=read.csv("mine_MGV_connect.csv")
+anno_sp=read.csv("anno_sp.csv",row.names = "X")
+phage_anno=read.csv("phage_anno.csv",row.names = "X")
+
+tmp=table(mine_MGV_connect$sp)
+tmp=tmp[order(tmp,decreasing = T)]
+
+
+mine_network=merge(unique(mine_MGV_connect[,c("votu_id","dRep_cluster")]),unique(mine_MGV_connect[,c("votu_id","dRep_cluster")]),by="votu_id")
+mine_network=subset(mine_network,dRep_cluster.x !=dRep_cluster.y)
+mine_network=merge(mine_network,anno_sp[,c(1,3:9,14)],by.x="dRep_cluster.x",by.y="dRep_cluster")
+mine_network=merge(mine_network,anno_sp[,c(1,3:9,14)],by.x="dRep_cluster.y",by.y="dRep_cluster")
+mine_network=merge(mine_network,unique(phage_anno[,c("votu_id","type_temp")]))
+
+mine_network$type="cross_species"
+#mine_network[mine_network$sp.x!=mine_network$sp.y,"type"]="cross_species"
+mine_network[mine_network$ge.x!=mine_network$ge.y,"type"]="cross_genus"
+mine_network[mine_network$fa.x!=mine_network$fa.y,"type"]="cross_family"
+mine_network[mine_network$or.x!=mine_network$or.y,"type"]="cross_order"
+mine_network[mine_network$cl.x!=mine_network$cl.y,"type"]="cross_class"
+mine_network[mine_network$ph.x!=mine_network$ph.y,"type"]="cross_phylum"
+mine_network$type_hl="H-L"
+mine_network[mine_network$type.1.x=="highAbun"&mine_network$type.1.y=="lowAbun","type_hl"]="H-H"
+mine_network[mine_network$type.1.x=="lowAbun"&mine_network$type.1.y=="lowAbun","type_hl"]="L-L"
+mine_network$phylum="cross"
+mine_network[mine_network$ph.x=="Actinobacteriota"&mine_network$ph.y=="Actinobacteriota","phylum"]="Actinobacteriota"
+mine_network[mine_network$ph.x=="Bacteroidota"&mine_network$ph.y=="Bacteroidota","phylum"]="Bacteroidota"
+mine_network[mine_network$ph.x=="Firmicutes"&mine_network$ph.y=="Firmicutes","phylum"]="Firmicutes"
+mine_network[mine_network$ph.x=="Fusobacteriota"&mine_network$ph.y=="Fusobacteriota","phylum"]="Fusobacteriota"
+mine_network[mine_network$ph.x=="Proteobacteria"&mine_network$ph.y=="Proteobacteria","phylum"]="Proteobacteria"
+mine_network_genus=subset(mine_network,type!="cross_species")
+
+mine_network_genus$order_drep=apply(mine_network_genus, 1, function(a){b=a[c("dRep_cluster.x","dRep_cluster.y","votu_id")];c=paste(as.character(b[order(b)]),collapse ="-");return(c)})
+mine_network_unique <- distinct(mine_network_genus, order_drep, .keep_all = TRUE)
+
+
+sp_cr=data.frame(table(subset(mine_network,type=="cross_genus")$dRep_cluster.x))
+
+sp_cr=merge(sp_cr,anno_sp,by.x="Var1",by.y="dRep_cluster")
+sp_cr=sp_cr[order(sp_cr$Freq,decreasing = T),]
+ggplot(sp_cr,aes(x=sp,y=Freq))+geom_bar(stat="identity",aes(fill=fa))+xlim(rev(head(sp_cr$sp,20)))+theme_classic()
+fa_cr=data.frame(table(subset(mine_network,type=="cross_genus")$fa.x))
+fa_cr=fa_cr[order(fa_cr$Freq,decreasing = T),]
+ggplot(fa_cr,aes(x=Var1,y=Freq))+geom_bar(stat="identity",aes(fill=Var1))+xlim(rev(head(fa_cr$Var1,20)))+theme_classic()+theme()
+
+
+mine_network$type_temp_p="virulent"
+mine_network[mine_network$votu_id  %in% subset(mine_network,type_temp=="temperate")$votu_id,"type_temp_p"]="temperate"
+mine_network=unique(mine_network[,c(1:19,21:24)])
+mine_network$order_drep=apply(mine_network, 1, function(a){b=a[c("dRep_cluster.x","dRep_cluster.y","votu_id")];c=paste(as.character(b[order(b)]),collapse ="-");return(c)})
+mine_network_unique <- distinct(mine_network, order_drep, .keep_all = TRUE)
+mine_network_unique_genus=subset(mine_network_unique,type!="cross_species")
+
+
+mine_network_unique_genus$type=factor(mine_network_unique_genus$type,levels=c("cross_genus","cross_family","cross_order","cross_class","cross_phylum"))
+table(mine_network_unique_genus$type)
+ggplot(mine_network_unique_genus,aes(y=type))+geom_bar()+theme_classic()+ylim(rev(c("cross_genus","cross_family","cross_order","cross_class","cross_phylum")))
+
+mine_network_unique_genus_lanch=subset(mine_network_unique_genus,fa.x=="Lachnospiraceae" | fa.y=="Lachnospiraceae")
+table(mine_network_unique_genus_lanch$type)
+ggplot(mine_network_unique_genus_lanch,aes(y=type))+geom_bar()+theme_classic()+ylim(rev(c("cross_genus","cross_family","cross_order","cross_class","cross_phylum")))
+
+
+mine_network_unique_genus_bacter=subset(mine_network_unique_genus,fa.x=="Bacteroidaceae" | fa.y=="Bacteroidaceae")
+table(mine_network_unique_genus_bacter$type)
+ggplot(mine_network_unique_genus_bacter,aes(y=type))+geom_bar()+theme_classic()+ylim(rev(c("cross_genus","cross_family","cross_order","cross_class","cross_phylum")))
+
+table(mine_network_unique_genus$type_temp_p)
+
+involved_sp=unique(mine_network_genus[,c(3:10)])
+dim(involved_sp)
+table(involved_sp$fa.x)
+anno_sp_phage=anno_sp
+anno_sp_phage$multisp_count =as.numeric(table(unique(mine_network_genus[,c("dRep_cluster.x","votu_id")])$dRep_cluster)[anno_sp_phage$dRep_cluster])
+anno_sp_phage$multisp_temp=as.numeric(table(unique(subset(mine_network_genus,type_temp_p=="temperate")[,c("dRep_cluster.x","votu_id")])$dRep_cluster)[anno_sp_phage$dRep_cluster])
+anno_sp_phage$multisp_vir=as.numeric(table(unique(subset(mine_network_genus,type_temp_p=="virulent")[,c("dRep_cluster.x","votu_id")])$dRep_cluster)[anno_sp_phage$dRep_cluster])
+
+anno_sp_phage[is.na(anno_sp_phage$multisp_count),"multisp_count"]=0
+anno_sp_phage[is.na(anno_sp_phage$multisp_temp ),"multisp_temp"]=0
+anno_sp_phage[is.na(anno_sp_phage$multisp_vir ),"multisp_vir"]=0
+
+anno_sp_phage$model="mix"
+anno_sp_phage[anno_sp_phage$multisp_vir==0,"model"]="TM"
+anno_sp_phage[anno_sp_phage$multisp_temp ==0,"model"]="VM"
+anno_sp_phage[anno_sp_phage$multisp_count  ==0,"model"]="none"
+anno_sp_phage[anno_sp_phage$genom_with_phage   ==0,"model"]="no_phage"
+anno_sp_phage=anno_sp_phage[order(anno_sp_phage$multisp_count),]
+
+long_multisp_phage=anno_sp_phage[,c("do","ph","cl","or","fa","ge","sp","dRep_cluster","Rep_SP_ID","multisp_temp")]
+long_multisp_phage2=anno_sp_phage[,c("do","ph","cl","or","fa","ge","sp","dRep_cluster","Rep_SP_ID","multisp_vir")]
+colnames(long_multisp_phage)[10]="multisp_count"
+colnames(long_multisp_phage2)[10]="multisp_count"
+long_multisp_phage$type="temperate"
+long_multisp_phage2$type="virulent"
+long_multisp_phage=rbind(long_multisp_phage,long_multisp_phage2)
+
+ggplot(subset(long_multisp_phage,fa=="Lachnospiraceae"),aes(x=sp,y=multisp_count,fill=type))+geom_bar(stat="identity")+theme_classic()+xlim(subset(anno_sp_phage,fa=="Lachnospiraceae"&multisp_count>0)$sp)+coord_flip()
+ggplot(subset(long_multisp_phage,fa=="Bacteroidaceae"),aes(x=sp,y=multisp_count,fill=type))+geom_bar(stat="identity")+theme_classic()+xlim(subset(anno_sp_phage,fa=="Bacteroidaceae"&multisp_count>0)$sp)+coord_flip()
+```
+#Figure3
+```{r}
+connect_bact=unique(mine_network_unique[,c(2:10,12:18,20,21,22)])
+connect_bact=merge(connect_bact,subset(data.frame(table(unique(mine_network_unique[,c("dRep_cluster.x","dRep_cluster.y","type_temp_p")])[,1:2])),Freq>0))
+connect_bact=merge(connect_bact,unique(mine_network_unique[,c("dRep_cluster.x","dRep_cluster.y","type_temp_p")]))
+connect_bact$type_temp2="mix"
+connect_bact[connect_bact$Freq==1,"type_temp2"]=connect_bact[connect_bact$Freq==1,"type_temp_p"]
+connect_bact=unique(connect_bact[,c(1:19,22)])
+connect_bact$cid=paste0("c",rownames(connect_bact))
+
+write.table(subset(connect_bact,type=="cross_genus"&fa.x=="Lachnospiraceae"),file="lanchno_pair.tsv",sep="\t",quote = F,row.names = F,col.names = F)
+write.table(subset(connect_bact,type=="cross_genus"&fa.x=="Bacteroidaceae"),file="bacter_pair.tsv",sep="\t",quote = F,row.names = F,col.names = F)
+bacter_global=read.delim("bacter_community.res_global.tsv")
+lanch_global=read.delim("lanchno_community.res_global.tsv")
+lanch_global$family="Lachnospiraceae"
+bacter_global$family="Bacteroidaceae"
+
+connect_bact_beyond=subset(connect_bact,type!="cross_species")
+connect_bact_beyond=merge(connect_bact_beyond,anno_sp[,1:2],by.x="dRep_cluster.x",by.y="dRep_cluster")
+connect_bact_beyond=merge(connect_bact_beyond,anno_sp[,1:2],by.x="dRep_cluster.y",by.y="dRep_cluster")
+
+connect_bact_lanchno=subset(connect_bact_beyond,fa.x=="Lachnospiraceae"&fa.y=="Lachnospiraceae")
+connect_bact_bacter=subset(connect_bact_beyond,fa.x=="Bacteroidaceae"&fa.y=="Bacteroidaceae")
+connect_bact_other=subset(connect_bact_beyond,!fa.x %in% c("Lachnospiraceae","Bacteroidaceae")&!fa.y %in% c("Lachnospiraceae","Bacteroidaceae"))
+
+comminity_global=merge(comminity_global,connect_bact,by.x="community",by.y="cid")
+gener_com_size=function(sample_lanchno){
+  gener_comunity=data.frame(cid=character(0),sp=character(0))
+  for (j in 2:10){
+    for (i in 1:100){
+      gener_comunity=rbind(gener_comunity,data.frame(cid=paste0("c",j,"_",i),sp=sample_lanchno[sample(length(sample_lanchno),j)]))
+    }
+  }
+  return(gener_comunity)
+}
+gener_comunity_lancho=gener_com_size(unique(c(connect_bact_lanchno$Rep_SP_ID.x,connect_bact_lanchno$Rep_SP_ID.y)))
+gener_comunity_bacter=gener_com_size(unique(c(connect_bact_bacter$Rep_SP_ID.x,connect_bact_bacter$Rep_SP_ID.y)))
+gener_comunity_other2=gener_com_size(subset(anno_sp,!fa %in% c("Lachnospiraceae","Bacteroidaceae")&do!="Archaea")$Rep_SP_ID)
+write.table(gener_comunity_other,"gener_comunity_other.tsv",sep = "\t",quote = F,row.names = F)
+write.table(gener_comunity_bacter,"gener_comunity_bacter.tsv",sep = "\t",quote = F,row.names = F)
+write.table(gener_comunity_lancho,"gener_comunity_lancho.tsv",sep = "\t",quote = F,row.names = F)
+
+gener_bacter_global=read.delim("Figure6/gener_comunity_bacter.res_global.tsv")
+gener_lancho_global=read.delim("Figure6/gener_comunity_lancho.res_global.tsv")
+gener_other_global=read.delim("Figure6/gener_comunity_other.res_global.tsv")
+
+gener_bacter_global$family="Bacteroidaceae"
+gener_lancho_global$family="Lachnospiraceae"
+gener_other_global$family="Other"
+
+comminity_global=rbind(gener_bacter_global,gener_lancho_global,gener_other_global)
+comminity_global$mip=as.numeric(comminity_global$mip)
+comminity_global$mro=as.numeric(comminity_global$mro)
+
+ggplot(comminity_global,aes(x=as.factor(size),y=mip,fill=family))+geom_boxplot()+theme_classic()+xlab("Comunity size")+scale_fill_brewer(palette = "Set2")
+ggplot(comminity_global,aes(x=mro,y=mip,col=family))+geom_point()+theme_classic()+facet_wrap(~size)+scale_color_brewer(palette = "Set2")
+
+bacter_global=read.delim("bacter.res_global.tsv")
+bacter_smentana=read.delim("bacter.c234.smenta",header = F)
+bacter_global=merge(bacter_global,bacter_smentana,by.x="community",by.y = "V3")
+
+lanchno_global=read.delim("lanchno.res_global.tsv")
+lanchno_smentana=read.delim("lanchno.c234.smenta",header = F)
+lanchno_global=merge(lanchno_global,lanchno_smentana,by.x="community",by.y = "V3")
+global_twofa=rbind(bacter_global,lanchno_global)
+
+lanchno_global$mip=as.numeric(lanchno_global$mip)
+
+bacter_global$mip/lanchno_global$mip
+
+
+calculate_fold=function(group1,group2){
+
+fc_matrix <- matrix(nrow = length(group2), ncol = length(group1))
+
+
+for (i in 1:length(group2)) {
+  for (j in 1:length(group1)) {
+    fc_matrix[i, j] <- group2[i] / group1[j]
+  }
+}
+fold_mt=melt(fc_matrix)$value
+fold_mt=fold_mt[!is.na(fold_mt)]
+fold_mt=log2(fold_mt)
+quantile(fold_mt,probs = c(0.05,0.25,0.5,0.75,0.95))
+}
+ggplot(rbind(lanchno_global,bacter_global))+geom_density(aes(x=V4,col=V1))+theme_classic()+facet_grid(~V2)
+
+
+group2_mip=subset(lanchno_global,!is.na(lanchno_global$mip)&V2=="c2")$mip
+group1_mip=subset(bacter_global,!is.na(bacter_global$mip)&V2=="c2")$mip
+fold_mip_c2=calculate_fold(group1_mip,group2_mip)
+group2_mip=subset(lanchno_global,!is.na(lanchno_global$mip)&V2=="c3")$mip
+group1_mip=subset(bacter_global,!is.na(bacter_global$mip)&V2=="c3")$mip
+fold_mip_c3=calculate_fold(group1_mip,group2_mip)
+group2_mip=subset(lanchno_global,!is.na(lanchno_global$mip)&V2=="c4")$mip
+group1_mip=subset(bacter_global,!is.na(bacter_global$mip)&V2=="c4")$mip
+fold_mip_c4=calculate_fold(group1_mip,group2_mip)
+
+group2_mro=subset(lanchno_global,!is.na(lanchno_global$mro)&V2=="c2")$mro
+group1_mro=subset(bacter_global,!is.na(bacter_global$mro)&V2=="c2")$mro
+fold_mro_c2=calculate_fold(group1_mro,group2_mro)
+group2_mro=subset(lanchno_global,!is.na(lanchno_global$mro)&V2=="c3")$mro
+group1_mro=subset(bacter_global,!is.na(bacter_global$mro)&V2=="c3")$mro
+fold_mro_c3=calculate_fold(group1_mro,group2_mro)
+group2_mro=subset(lanchno_global,!is.na(lanchno_global$mro)&V2=="c4")$mro
+group1_mro=subset(bacter_global,!is.na(bacter_global$mro)&V2=="c4")$mro
+fold_mro_c4=calculate_fold(group1_mro,group2_mro)
+
+#5%        50%        95% 
+#-0.4933320 -0.1575413  0.1688769 
+
+group2_sme=subset(lanchno_global,!is.na(lanchno_global$V4)&V2=="c2")$V4
+group1_sme=subset(bacter_global,!is.na(bacter_global$V4)&V2=="c2")$V4
+fold_sme_c2=calculate_fold(group1_sme,group2_sme)
+group2_sme=subset(lanchno_global,!is.na(lanchno_global$V4)&V2=="c3")$V4
+group1_sme=subset(bacter_global,!is.na(bacter_global$V4)&V2=="c3")$V4
+fold_sme_c3=calculate_fold(group1_sme,group2_sme)
+group2_sme=subset(lanchno_global,!is.na(lanchno_global$V4)&V2=="c4")$V4
+group1_sme=subset(bacter_global,!is.na(bacter_global$V4)&V2=="c4")$V4
+fold_sme_c4=calculate_fold(group1_sme,group2_sme)
+#5%        50%        95% 
+#-0.4912553  0.6119172  1.8873133 
+
+fold_all= rbind(fold_mip_c2,fold_mip_c3,fold_mip_c4,fold_mro_c2,fold_mro_c3,fold_mro_c4,fold_sme_c2,fold_sme_c3,fold_sme_c4)
+fold_all$community=rep(c("c2","c3","c4"),3)
+ggplot(fold_all,aes(x=community,y=X50.,fill=type))+geom_bar(stat="identity",position = "dodge",width=0.5)+theme_classic()
+```
+#Figure4(Python)
+
+```{python }
+plt.figure(figsize=[4,3])
+plt.bar(rrn_ident.index,rrn_ident,width=0.2,color="grey")
+
+plt.bar(rrn_ident[(rrn_ident.index>=86.5) & (rrn_ident.index<94.5)].index,rrn_ident[(rrn_ident.index>=86.5) & (rrn_ident.index<94.5)],width=0.2,color="#a64443")
+plt.bar(rrn_ident[rrn_ident.index<86.5].index,rrn_ident[rrn_ident.index<86.5],width=0.2,color="#80c1e0")
+plt.bar(rrn_ident[(rrn_ident.index>=94.5) & (rrn_ident.index<98.7)].index,rrn_ident[(rrn_ident.index>=94.5) & (rrn_ident.index<98.7)],width=0.2,color="#da8351")
+
+plt.axvline(98.7,lw=1.5,ls="--",color="black")
+plt.axvline(94.5,lw=1.5,ls="--",color="black")
+plt.axvline(86.5,lw=1.5,ls="--",color="black")
+plt.xlabel("Identity (%)",size=14)
+plt.ylabel("Log2 Frequency",size=14)
+plt.xticks([86.5,94.5,98.7],size=12)
+plt.xlim(84,100.2)
+plt.yticks(size=12)
+
+plt.savefig("identity_distri_full_16s.pdf")
+
+#Figure 4C
+
+HV_san.opts(hv.opts.Sankey(edge_color='S1', node_color='index', cmap='Category20',node_sort=True,edge_alpha=0.4
+                           ,node_linewidth=0,node_padding=15,node_width=20,hooks=[font_size]))
+plt.rcparams={'pdf.fonttype': 42}
+fig_g = hv.render(HV_san, backend='matplotlib')
+fig_g.savefig("sankey.pdf")
+
+
+#Figure 4E
+fig = plt.figure()
+plt.barh(["EggNog","Pfam","KEGG"],[0.7308758811924897,0.5585967138935257,0.3979334225447322])
+plt.yticks(size=12)
+plt.savefig("annotation rate.pdf")
+
+#Figure 4F
+fig=plt.figure(figsize=[35,8])
+ax1=fig.add_subplot(141)
+sns.barplot(data=for_plot_df,y="Des",x="Strain count",ax=ax1,color="black")
+plt.grid(True,axis="y",zorder=0,ls=":",lw=2)
+plt.xlim([0,200])
+ax2=fig.add_subplot(142)
+sns.barplot(data=for_plot_df,y="Rep",x="Species count",ax=ax2,color="grey")
+plt.ylabel("")
+plt.xlim([0,38])
+plt.grid(True,axis="y",zorder=0,ls=":",lw=2)
+ax3=fig.add_subplot(143)
+sns.barplot(data=for_plot_df,y="Rep",x="Genus count",ax=ax3,color="blue")
+plt.ylabel("")
+plt.grid(True,axis="y",zorder=0,ls=":",lw=2)
+plt.xlim([0,38])
+plt.tight_layout()
+plt.savefig("more 65 pro-clus_popular.pdf")
+```
+
+
+#Figure5
+
+```{r}
+bin_coverM_unculture=read.csv("bin_healthy.csv",row.names = "X")
+anno_sp=read.csv("anno_sp.csv",row.names = "X")
+
+sampling_propotion_abundence=function(cpcc_pair,sample_sheet,bin_coverM_unculture,sample_n,bootstrap){
+  proption_weighted_abundece=data.frame()
+  for (i in 1:bootstrap){
+    set.seed(i)
+    sample_s=sample(sample_sheet$sampleID,sample_n)
+    for (j in 1:nrow(cpcc_pair)){
+      bin_select=t(bin_coverM_unculture[as.character(cpcc_pair[j,c("Rep_SP_ID.x","Rep_SP_ID.y")]),sample_s])
+      proption=nrow(bin_select[bin_select[,1]>0&bin_select[,2]>0,])/nrow(bin_select)
+      if(length(proption)==0){
+        proption=0
+      }
+      weightedAbundence=mean(bin_select)
+      proption_weighted_abundece=rbind(proption_weighted_abundece,c(i,cpcc_pair[j,"community"],proption,weightedAbundence))
+    }
+  }
+  colnames(proption_weighted_abundece)=c("seed","community","proption","weightedAbundence")
+  proption_weighted_abundece$proption=as.numeric(proption_weighted_abundece$proption)
+  proption_weighted_abundece$weightedAbundence=as.numeric(proption_weighted_abundece$weightedAbundence)
+  proption_weighted_abundece=merge(proption_weighted_abundece,cpcc_pair[,c("community","family")])
+  return(proption_weighted_abundece)
+}
+plot_bar_box=function(proption_abundence_mean,group,cluster,log=F,pointName){
+  to_plot=data.frame(mean=tapply(proption_abundence_mean[,group],proption_abundence_mean[,cluster],mean),sd=tapply(proption_abundence_mean[,group],proption_abundence_mean[,cluster],sd))
+  to_plot$cluster=rownames(to_plot)
+  if(log==F){
+  p1=ggplot(to_plot,aes(y=mean,x=cluster,fill=cluster))+geom_bar(stat="identity",width=0.5)+geom_errorbar(aes(ymin=mean-sd,ymax=mean+sd),width=0.1)+theme_classic()+scale_fill_brewer(palette = "Set2")
+  }else{
+    p1=ggplot(to_plot,aes(y=log10(mean)+1,x=cluster,fill=cluster))+geom_bar(stat="identity",width=0.5)+geom_errorbar(aes(ymin=log10(mean-sd)+1,ymax=log10(mean+sd)+1),width=0.1)+theme_classic()+scale_fill_brewer(palette = "Set2")
+  }
+  print (p1)
+  ggsave(pointName,width = 4,height=3)
+}
+
+proption_abundence_mean_disease=rbind(data.frame(seed=1:100,disease="Healthy",proption=tapply(proption_abundence_healthy$proption,proption_abundence_healthy[,c("seed","family")], mean),abundence=tapply(proption_abundence_healthy$weightedAbundence,proption_abundence_healthy[,c("seed","family")], mean)),
+  data.frame(seed=1:100,disease="IBD",proption=tapply(proption_abundence_ibd$proption,proption_abundence_ibd[,c("seed","family")], mean),abundence=tapply(proption_abundence_ibd$weightedAbundence,proption_abundence_ibd[,c("seed","family")], mean)),
+  data.frame(seed=1:100,disease="OB",proption=tapply(proption_abundence_ob$proption,proption_abundence_ob[,c("seed","family")], mean),abundence=tapply(proption_abundence_ob$weightedAbundence,proption_abundence_ob[,c("seed","family")], mean)))
+ 
+ proption_abundence_select_cid=function(cid){
+   propotion_abundence_s=data.frame(rbind(subset(proption_abundence_healthy,community ==cid),
+                    subset(proption_abundence_ibd,community ==cid),
+                    subset(proption_abundence_ob,community ==cid)))
+   plot_bar_box(propotion_abundence_s,"proption","disease",log = F,paste0("proption_",cid,"_disease.pdf"))
+   plot_bar_box(propotion_abundence_s,"weightedAbundence","disease",log =T,paste0("abundence_",cid,"_disease.pdf"))
+ }
+ select_community=c("c379","c338","c498","c1116","c1106","c1108")
+ proption_abundence_select_cid("c379")
+ proption_abundence_select_cid("c338")
+ proption_abundence_select_cid("c498")
+ proption_abundence_select_cid("c1116")
+ proption_abundence_select_cid("c1106")
+ proption_abundence_select_cid("c1108")
+ 
+ plot_bar_box(proption_abundence_mean,"proption.Bacteroidaceae","disease",log = F,"proption_bacteroideceae_disease.pdf")
+ plot_bar_box(proption_abundence_mean,"proption.Lachnospiraceae","disease",log = F,"proption_lanchno_disease.pdf")
+ plot_bar_box(proption_abundence_mean,"abundence.Bacteroidaceae","disease",log = T,"abudnece_bacter_disease.pdf")
+ plot_bar_box(proption_abundence_mean,"abundence.Lachnospiraceae","disease",log = T,"abudnece_lanchno_disease.pdf")
+```
+
+
+#Figure S1B
+```{r}
+seqkit_stat <- read_table("seqkit_stat", 
+                          col_types = cols(
+                            file = col_character(),
+                            format = col_character(),
+                            type = col_character(),
+                            .default = col_number()  
+                          ))
+seqkit_stat$file <- sub("\\.fa$", "", seqkit_stat$file)
+metadata=read.csv("../metadata.csv")[1:237,]
+seqkit_stat=merge(seqkit_stat,metadata[,2:4],by.x="file",by.y="Seq_ID",all.x = T)
+
+cMECOS_sp=unique(annotation_genome_abun[,c("Rep_SP_ID","PID")])
+mt_abudence=merge(mt_abudence,unique(annotation_genome_abun[,c("sample_ID","PID","Cul_type")]),by.x="Var2",by.y="sample_ID")
+mt_abudence_pid=merge(mt_abudence,cMECOS_sp,by.x=c("PID","Var1"),by.y=c("PID","Rep_SP_ID"))
+
+tmp=subset(annotation_genome_abun,Cul_type=="unculture")[,c("Rep_SP_ID","PID")]
+tmp$HMQ_unculture="Y"
+mt_abudence_pid=merge(mt_abudence_pid,tmp,by.x=c("Var1","PID"),by.y=c("Rep_SP_ID","PID"),all.x=T)
+mt_abudence_pid[is.na(mt_abudence_pid$HMQ_unculture),"HMQ_unculture"]="N"
+
+ggplot(subset(mt_abudence_pid,Cul_type =="unculture"),aes(x=log10(value),col=HMQ_unculture))+geom_density()+xlab("Abundence")+theme_classic()+geom_vline(xintercept = -0.8238569)
+```
+
+
+#Figure S1E
+```{python}
+fig=plt.figure(figsize=[10,4])
+ax1=fig.add_subplot(211)
+sns.barplot(data=plot_count_.drop(columns="strain").apply(lambda x:np.log10(x+1)),x=plot_count_.index,y="Continent",ax=ax1,color="#6e996e")
+plt.xticks([])
+plt.xticks([])
+ax2=fig.add_subplot(212)
+sns.heatmap(strain_distribute_in_Continent_2.drop(columns="strain").T[plot_count_.index],cmap=cmap_new2,ax=ax2)
+plt.xticks([])
+fig.savefig("S1E.pdf")
+```
+
+
+#Figure S1G
+```{r}
+novel_sp=read.csv("novel_sp_fa_count.csv")
+ggplot(novel_sp,aes(x=fa,y=count))+geom_bar(stat="identity",aes(fill=ph))+geom_text(aes(label=count))+xlim(rev(novel_sp$fa))+coord_polar()+theme_classic()+scale_fill_brewer(palette = "Set1")
+ggplot(novel_sp,aes(x=fa,y=log2(count)+1))+geom_bar(stat="identity",aes(fill=ph))+geom_text(aes(label=count))+xlim(rev(novel_sp$fa))+coord_polar()+theme_classic()+scale_fill_brewer(palette = "Set1")
+
+novel_sp$fa=factor(novel_sp$fa,levels = novel_sp$fa)
+novel_sp$fa2=as.character(novel_sp$fa)
+novel_sp[6:nrow(novel_sp),"fa2"]="Other"
+novel_sp$fa2=factor(novel_sp$fa2,levels = novel_sp$fa2[1:6])
+ggplot(novel_sp,aes(x=ph,y=count,fill=fa2))+geom_bar(stat="identity")+theme_classic()+scale_fill_brewer(palette = "Set1")+xlim(c("Firmicutes","Actinobacteriota","Bacteroidota","Proteobacteria","Fusobacteriota"))
+
+
+novel_st=read.csv("novel_st_fa_count.csv")
+ggplot(novel_st,aes(x=fa,y=count))+geom_bar(stat="identity",aes(fill=ph))+geom_text(aes(label=count))+xlim(rev(novel_st$fa))+coord_polar()+theme_classic()+scale_fill_brewer(palette = "Set1")
+ggplot(novel_st,aes(x=fa,y=log2(count)+1))+geom_bar(stat="identity",aes(fill=ph))+geom_text(aes(label=count))+xlim(rev(novel_st$fa))+coord_polar()+theme_classic()+scale_fill_brewer(palette = "Set1")
+```
+
+#Figure S2
+```{r}
+library(reshape2)
+mine_network=read.csv("mine_network.csv",row.names = "X")
+
+mine_network_ge=subset(mine_network,type!="cross_species")
+tmp1=subset(mine_network,type!="cross_species")[,c("votu_id","dRep_cluster.x","sp.x")]
+tmp2=subset(mine_network,type!="cross_species")[,c("votu_id","dRep_cluster.y","sp.y")]
+colnames(tmp1)=c("votu_id","dRep_cluster","sp")
+colnames(tmp2)=c("votu_id","dRep_cluster","sp")
+
+
+multiple_phage_sp=unique(rbind(tmp1,tmp2))
+multiple_phage_sp$count=1
+matrix_phage_sp=acast(multiple_phage_sp,votu_id ~dRep_cluster,value.var="count",fill=0)
+
+matrix=matrix_phage_sp
+adjacency <- rbind(
+  cbind(matrix(0, nrow = nrow(matrix), ncol = nrow(matrix)), matrix),
+  cbind(t(matrix), matrix(0, nrow = ncol(matrix), ncol = ncol(matrix)))
+)
+rownames(adjacency) <- c(paste0("P_", rownames(matrix)), paste0("B_", colnames(matrix)))
+colnames(adjacency) <- rownames(adjacency)
+
+
+graph <- graph_from_adjacency_matrix(adjacency, mode = "undirected", weighted = NULL)
+
+
+communities <- cluster_louvain(graph)
+modularity_value <- modularity(communities)
+
+
+node_types <- ifelse(grepl("^P_", V(graph)$name), "Phage", "Bacteria")
+membership <- data.frame(
+  node = V(graph)$name,
+  type = node_types,
+  community = communities$membership
+)
+
+
+phages <- rownames(matrix)
+bacteria <- colnames(matrix)
+
+
+membership <- membership %>%
+  mutate(
+    type = ifelse(grepl("^P_", node), "Phage", "Bacteria"),
+    node_clean = gsub("^P_|^B_", "", node)
+  )
+
+
+phage_order <- membership %>%
+  filter(type == "Phage") %>%
+  arrange(community) %>%
+  pull(node_clean)
+
+bacteria_order <- membership %>%
+  filter(type == "Bacteria") %>%
+  arrange(community) %>%
+  pull(node_clean)
+
+
+matrix_ordered <- matrix[phage_order, bacteria_order]
+
+
+matrix_melt <- melt(matrix_ordered) %>%
+  rename(Phage = Var1, Bacteria = Var2, Interaction = value)
+
+
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(RColorBrewer)
+
+
+
+n_communities <- max(membership$community)
+color_palette <- c(brewer.pal(9, "Set1")[1:5],rep("#636363",n_communities-5))
+
+
+phage_colors <- membership %>%
+  filter(type == "Phage") %>%
+  mutate(color = color_palette[community]) %>%
+  select(node_clean, color)
+
+bacteria_colors <- membership %>%
+  filter(type == "Bacteria") %>%
+  mutate(color = color_palette[community]) %>%
+  select(node_clean, color)
+
+
+matrix_melt <- melt(matrix_ordered) %>%
+  rename(Phage = Var1, Bacteria = Var2, Interaction = value) %>%
+  left_join(phage_colors, by = c("Phage" = "node_clean")) %>%
+  rename(phage_color = color) %>%
+  left_join(bacteria_colors, by = c("Bacteria" = "node_clean")) %>%
+  rename(bacteria_color = color) %>%
+  mutate(
+    
+    color = case_when(
+      Interaction == 1 & phage_color == bacteria_color ~ phage_color,
+      Interaction == 1 & phage_color != bacteria_color ~ "gray",
+      TRUE ~ "white"
+    )
+  )
+
+
+p1=ggplot(matrix_melt, aes(y = Bacteria, x = Phage)) +
+  geom_tile(aes(fill = color), width = 1, height = 1) +  
+  scale_fill_identity() +  
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),  
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  ) +ylim(rev(as.character(bacteria_res$node_clean)))+xlim(as.character(phage_res$node_clean))
+
+p2=ggplot(bacteria_res,aes(y=node_clean,x=1,fill=fa2))+geom_tile()+theme_minimal() +theme( axis.text = element_blank(),axis.ticks = element_blank(),legend.position = "none")+ylim(rev(as.character(bacteria_res$node_clean)))+scale_fill_brewer(palette = "Set3")
+
+p2+p1+plot_layout(widths = c(1,20))
+
+bacteria_res$type_w="narrow"
+bacteria_res[bacteria_res$community %in%c(3,1,5),"type_w"]="broad"
+
+bacteria_res[!bacteria_res$fa %in% c("Lachnospiraceae","Bacteroidaceae"),"fa2"]="others"
+p1=ggplot(subset(bacteria_res,type_w=="broad"),aes(x=1,fill=fa2))+geom_bar(position = "fill")+theme_classic()+coord_polar(theta = "y")+ggtitle("Wide")
+p2=ggplot(subset(bacteria_res,type_w=="narrow"),aes(x=1,fill=fa2))+geom_bar(position = "fill")+theme_classic()+coord_polar(theta = "y")+ggtitle("Narrow")
+p1+p2
+```
+#FigureS4
+```{r}
+novel_protein=read.csv("novel_protein_count.csv")
+NOG_res_cut=read.delim("NOG_res_cut",header = F)
+NOG_res_cut$V4=NOG_res_cut$V2
+NOG_res_cut[!NOG_res_cut$V4 %in% c("C","E","F","G","H","I","P","D","V","U","O","T","L","J","K"),"V4"]="Other"
+NOG_res_cut$V4=factor(NOG_res_cut$V4,levels = c("C","E","F","G","H","I","P","D","V","U","O","T","L","J","K","Other"))
+gplot(NOG_res_cut,aes(x=as.character(V1),y=V3,fill=V4))+geom_bar(stat="identity")+xlim(as.character(c(2,5,10,20,40,60)))+theme_classic()
+
+ggplot(NOG_res_cut,aes(x=as.character(V1),y=V3))+geom_bar(stat="identity")+xlim(as.character(c(2,5,10,20,40,60)))+theme_classic()
+ggplot(NOG_res_cut,aes(x=1,y=V3,fill=V4))+geom_bar(stat="identity",position = "fill")+facet_wrap(~V1)+theme_classic()+coord_polar(theta="y")
+
+NOG_res_cut=merge(NOG_res_cut,novel_protein[,c(1,3)],by.x="V1",by.y="strain_count")
+ggplot(subset(NOG_res_cut,V4!="Other"),aes(x=V1,y=perc,col=V4))+geom_point()+geom_line(aes(group=V4))+theme_classic()+facet_wrap(~V4)
+```
