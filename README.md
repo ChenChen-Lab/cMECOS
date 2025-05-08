@@ -147,9 +147,9 @@ awk -F "\t" '!a[$1]++{print}' 1.blast > uniq.blast
 - **Method**: Prokka v1.13.3
 - Prodigal v2.6.3 (`-p single -c -m`)
 
-
+```{bash}
 for i in `ls 5006_Mine_MAG/*.fa`;do x=`echo $i|sed -e 's/^5006_Mine_MAG\/pre\.//g' -e 's/\.fa//g'`;echo "prokka --outdir 5006_mine_annote_dir/raw/prokka_${x} --prefix ${x} ${i} --cpus 4";done| ~/anaconda3/bin/parallel -j 50
-
+```
 
 
 ### 4.2 Protein Clustering
@@ -157,7 +157,7 @@ for i in `ls 5006_Mine_MAG/*.fa`;do x=`echo $i|sed -e 's/^5006_Mine_MAG\/pre\.//
 - Clustering levels: 100%, 95%, 90% identity
 - Minimum coverage: 80% of shorter sequence
 
-
+```{bash}
 mkdir -p mmseq_dir/{DB,Clu,tsv}
 mmseqs createdb all_raw.faa mmseq_dir/DB/mm_seq_DB
 
@@ -176,13 +176,14 @@ mmseqs linclust mmseq_dir/DB/mm_seq_DB mmseq_dir/Clu/mm_seq_clu_90 mmseq_dir/tmp
 mmseqs createtsv mmseq_dir/DB/mm_seq_DB mmseq_dir/DB/mm_seq_DB mmseq_dir/Clu/mm_seq_clu_90 mmseq_dir/tsv/mm_seq_clu_90.tsv
 mmseqs createsubdb mmseq_dir/Clu/mm_seq_clu_90 mmseq_dir/DB/mm_seq_DB mmseq_dir/mm_seq_clu_90_rep
 mmseqs convert2fasta mmseq_dir/mm_seq_clu_90_rep mmseq_dir/mm_seq_clu_90_rep.faa
-
+```
 
 ### 4.3 Functional Annotation
-- **Method**: eMapper 
+- **Method**: eMapper
+```{bash}
 emapper.py -m diamond --no_annot --no_file_comments --data_dir /dev/shm --seed_ortholog_evalue 0.00001 --cpu 192 -i novel_90.faa -o ./emapper --override
 emapper.py --annotate_hits_table emapper.emapper.seed_orthologs --no_file_comments -o ./anno_ --cpu 192 --data_dir /dev/shm --override
-
+```
 ## 5. Phage-Host Network
 
 CRISPR Spacer Analysis
@@ -190,11 +191,11 @@ CRISPR Spacer Analysis
 - **Phage Matching**:  
 BLAST+ vs MGV database  
 Criteria: ≤1 mismatch/gap over ≥95% spacer length
-
+```{bash}
 conda activate CRISPRCasFinder
 mkdir CRISPR_FIND_ALL
 for i in `find -name '*.fa'`;do x=`echo ${i}|sed -e 's/^\.\/pre\.//g' -e 's/\.fa$//g' -e 's/^\.\///g'`;echo "extract_spacers_and_count_CRISPER.sh ${i} CRISPR_FIND_ALL/${x} 3 1";done|parallel -j 180 
-
+```
 
 ## 6. Metabolic Modeling
 - **GEM Reconstruction**: CarveMe v1.5.1
