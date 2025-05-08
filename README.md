@@ -130,7 +130,7 @@ gtdbtk classify_wf --genome_dir genomes/ --out_dir gtdbtk_out \
 Silva + Greengene + rrnDB → MMseqs2 (80% coverage, 100% identity)
 - **Annotation**: BLAST+ v2.9.0
 
-
+```{bash }
 for i in `find raw -name '*.ffn'`;do x=`echo ${i}|sed -e 's/\.ffn//g' -e 's/.*\///g'`;echo "~/anaconda3/bin/seqkit grep -j 192 -n -r -p  '16S ribosomal RNA$' ${i}|~/anaconda3/bin/seqkit replace -p '.*' -r \"${x}:_:\" |~/anaconda3/bin/seqkit rename|sed '/^>/ s/ $//g'";done|parallel -j 192  > all_full_len_16S.fa
 
 
@@ -139,7 +139,7 @@ makeblastdb -in combine3.fa -dbtype nucl  -out all_16S_db
 blastn -db /disk_RAID6_180T/Workstation/Chenchen2023_2/16S_database_punblic/all_16S_db -num_threads 192 -task megablast -query all_full_len_16S.fa  -max_target_seqs 3 -out all_16s.m6 -outfmt '6 qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs qcovhsp qcovus'
 awk -F "\t" '!a[$1]++{print}' 1.blast > uniq.blast
 
-
+```
 
 ## 4. Gene Catalog Construction
 
