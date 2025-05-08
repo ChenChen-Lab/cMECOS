@@ -11,19 +11,17 @@ conda install -c bioconda \
   bwa=0.7.15 \
   samtools=1.9 \
   metabat2=2.12.1 \
-  checkm-genome=1.2.0 \
+  checkm=1.2.0 \
   prokka=1.13.3 \
   mmseqs2=13.45111 \
   blast=2.9.0 \
-  mash=2.0 \
   gtdbtk=1.7.0 \
-  fasttree=2.1.10
+
 
 # Specialized tools
 conda install -c bioconda \
   athena=1.2 \
   drep=3.4.0 \
-  barrnap=0.9 \
   eggnog-mapper=2.0.1 \
   crisprcasfinder=2.0.2 \
   carveme=1.5.1 \
