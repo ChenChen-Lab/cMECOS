@@ -10,7 +10,7 @@
 	-h                  show help
 	-notrun             only write the shell, but not run
 =head1 Example
-	perl assembly_binning.pl  -fl fq.list  -o 
+	perl assembly_binning.pl  -assembly_list fa.list  -o 
 
 =head1 Version
         Author: guchaoyang0826@163.com
