@@ -45,12 +45,7 @@ pip install igraph==0.9.8 scikit-learn==0.24.2
   
 ```{bash eval=FALSE,include=FALSE, echo=TURE}
 
-# Quality filtering
-SOAPfilter_v2.2 -F CTGTCTCTTATACACATCT -R CTGTCTCTTATACACATCT \
-  -q 20 -p 0.1 -M 2 -f input.fq -o clean.fq
-# Host DNA removal
-bowtie2 --very-sensitive -x hg38_index -U clean.fq \
-  --un nohost.fq > host_mapped.sam 2> bowtie2.log  
+perl reads_QC.pl -F -R -bl barcode_list.txt -sl sample.list -host human -o 
   
 ```
 
