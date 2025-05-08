@@ -60,13 +60,7 @@ perl reads_QC.pl -F -R -bl barcode_list.txt -sl sample.list -host human -o
    
 ```{bash eval=FALSE,include=FALSE, echo=TURE}
 
-# Primary assembly
-metaspades.py -k 21,33,55 -t 32 -o assembly_dir \
-  --pe1-1 read1.fq --pe1-2 read2.fq
-
-# Co-barcode refinement
-bwa mem -t 16 contigs.fa reads.fq | samtools sort -@4 -o aligned.bam
-athena --threads 32 --config config.json
+perl reads_assembly.pl  -fl fq.list -type  -o 
   
 ```
 ### 1.3 Genome Binning
